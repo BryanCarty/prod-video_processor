@@ -81,6 +81,7 @@ else:
 
 def is_malicious(file_path):
     result = cd.scan_file(file_path)
+    rootLogger.debug(f'Is Malicious Result: {result}')
     if result:
         return True
     return False
