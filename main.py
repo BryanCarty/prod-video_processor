@@ -80,7 +80,8 @@ else:
 
 
 def is_malicious(file_path):
-    result = cd.scan_file(file_path)
+    with open(file_path, 'rb') as file_stream:  # open the file as a binary stream
+        result = cd.scan_stream(file_stream)
     rootLogger.debug(f'Is Malicious Result: {result}')
     if result:
         return True
