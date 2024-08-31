@@ -120,7 +120,7 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
         # Create directory using the generated ID
         video_dir = os.path.join(VIDEO_DIR, video_id)
         rootLogger.debug(f'{video_id}:crop_video:Creating video directory: {video_dir}')
-        os.makedirs(video_dir, mode=0o755, exist_ok=True)
+        os.makedirs(video_dir, mode=0o775, exist_ok=True)
 
         # Determine file format
         file_format = base64_video[0].split('/')[1]
