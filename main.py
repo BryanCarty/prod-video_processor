@@ -13,7 +13,6 @@ from sketchify import sketch
 import jwt
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
-import traceback
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
@@ -570,7 +569,8 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
         # Calculate text size and position for the title
         rootLogger.debug(f'{video_id}:finalize_video: Calculate text size and position for the title')
         title_text = video_details.title
-        title_width, title_height = draw.textsize(title_text, font=title_font)
+        title_height = title_font_size
+        title_width = draw.textlength(title_text, font=title_font)
         title_x = (pixel_width - title_width) // 2
         title_y = (pixel_height - title_height) // 2 - 42
 
@@ -585,7 +585,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
         # Calculate text size and position for website.com
         rootLogger.debug(f'{video_id}:finalize_video: Calculating text size and position for website.com')
         website_text = 'createaflipbook.com'
-        website_width, website_height = draw.textsize(website_text, font=website_font)
+        website_width = draw.textlength(website_text, font=website_font)
         space_between_texts = 20  # Space between title and website.com
         website_x = (pixel_width - website_width) // 2
         website_y = title_y + title_height + space_between_texts
@@ -670,8 +670,8 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
         edited_title_text = edited_title_text[:-1]
 
-
-        title_width, title_height = draw.textsize(edited_title_text, font=title_font)
+        title_height = title_font_size
+        title_width = draw.textlength(edited_title_text, font=title_font)
         title_x = (pixel_width - title_width) // 2 + 50
         title_y = (pixel_height - title_height) // 2
 
