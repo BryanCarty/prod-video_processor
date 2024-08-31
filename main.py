@@ -527,7 +527,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
             new_size = (pixel_height, pixel_height)
             
             # Resize the frame image
-            frame = frame.resize(new_size, Image.ANTIALIAS)
+            frame = frame.resize(new_size, Image.LANCZOS)
             
             # Calculate the position to paste the frame on the right side of the cover
             position = (pixel_width - pixel_height, 0)
