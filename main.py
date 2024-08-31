@@ -670,10 +670,10 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
         edited_title_text = edited_title_text[:-1]
 
-        title_height = title_font_size
-        title_width = draw.textlength(edited_title_text, font=title_font)
-        title_x = (pixel_width - title_width) // 2 + 50
-        title_y = (pixel_height - title_height) // 2
+        
+        text_left, text_top, text_right, text_bottom = draw.textbbox(text=edited_title_text, font=title_font)
+        title_x = (pixel_width - (text_right-text_left)) // 2 + 50
+        title_y = (pixel_height - (text_bottom-text_top)) // 2
 
         # Draw the title text
         draw.text((title_x, title_y), edited_title_text, fill=orange, font=title_font, align='center')
