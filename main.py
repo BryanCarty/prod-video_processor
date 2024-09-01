@@ -880,4 +880,4 @@ async def delete_video(video_details: DeleteVideoDetails, response: Response, au
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=HOST, port=PORT, ssl_keyfile="server.key", ssl_certfile="server.crt")
+    uvicorn.run(app, host=HOST, port=PORT)
