@@ -155,6 +155,12 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
         # Extract width and height
         width = video_info['streams'][0]['width']
         height = video_info['streams'][0]['height']
+        rotation = video_info['streams'][0].get('rotation', 0)  # Default to 0 if no rotation info
+
+        # Adjust width and height if the video is rotated by 90 or 270 degrees
+        if abs(rotation) in [90, 270]:
+            width, height = height, width
+
         rootLogger.debug(f'{video_id}:crop_video: Video dimensions retrieved: {width}x{height}')
 
         # Calculate cropping dimensions
