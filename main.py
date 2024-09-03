@@ -145,7 +145,7 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
             "ffprobe", 
             "-v", "error", 
             "-select_streams", "v:0", 
-            "-show_entries", "stream=width,height", 
+            "-show_entries", "stream=width,height,rotation", 
             "-of", "json", 
             video_path
         ]
