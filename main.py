@@ -174,7 +174,7 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
 
         result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         video_info = json.loads(result.stdout)
-        rotation = video_info['streams'][0].get('side_data_list', [])[0].get("rotation", 0)
+        rotation = video_info['streams'][0].get('side_data_list', [{}])[0].get("rotation", 0)
         rootLogger.debug(f'{video_id}:crop_video: Rotation: {rotation}')
 
         # Calculate cropping dimensions
