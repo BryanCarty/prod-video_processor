@@ -140,6 +140,22 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
             raise ValueError(f"{video_id}:crop_video: Malicious Video Upload Attempt: {video_path}")
             
 
+        # Get rotation info
+        command = [
+            "ffprobe", 
+            "-v", "0", 
+            "-select_streams", "v:0", 
+            "-show_entries", "stream_side_data=rotation",
+            "-of", "json", 
+            video_path
+        ]
+
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        video_info = json.loads(result.stdout)
+        rotation = int(video_info['streams'][0].get('side_data_list', [{}])[0].get("rotation", 0))
+        rootLogger.debug(f'{video_id}:crop_video: Rotation: {rotation}')
+
+
         # Get video dimensions using ffprobe
         command = [
             "ffprobe", 
@@ -158,24 +174,13 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
         # Extract width and height
         width = video_info['streams'][0]['width']
         height = video_info['streams'][0]['height']
+
+        if rotation not in [0, 180 -180]:
+            width, height = height, width
+
         rootLogger.debug(f'{video_id}:crop_video: Video dimensions retrieved: {width}x{height}')
 
-        # Get rotation info
-        # ffprobe -v 0 -select_streams v:0 -show_entries stream_side_data=rotation -of json base_video.mp4 
-        command = [
-            "ffprobe", 
-            "-v", "0", 
-            "-select_streams", "v:0", 
-            "-show_entries", "stream_side_data=rotation",
-            "-of", "json", 
-            video_path
-        ]
 
-
-        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        video_info = json.loads(result.stdout)
-        rotation = video_info['streams'][0].get('side_data_list', [{}])[0].get("rotation", 0)
-        rootLogger.debug(f'{video_id}:crop_video: Rotation: {rotation}')
 
         # Calculate cropping dimensions
         x_start = int(width * video_details.x_start_percent)
