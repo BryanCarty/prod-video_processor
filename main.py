@@ -21,15 +21,29 @@ import zipfile
 from io import BytesIO
 from fastapi.responses import StreamingResponse
 from typing import Dict
-from datetime import datetime, timedelta
+from datetime import datetime
 import pyclamd
 import logging
 import time
 import uvicorn
+import argparse
 
 
+# Function to parse command-line arguments
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run the FastAPI app with a specific environment")
+    parser.add_argument('env', type=str, help="Environment to run (dev or prod)")
+    args = parser.parse_args()
+    return args
 
-load_dotenv()
+# Parse the environment flag from the command-line
+args = parse_args()
+env = args.env[4:]
+
+print(f'Loading env: {env}')
+
+
+load_dotenv(env)
 
 VIDEO_DIR = os.getenv('VIDEO_DIR')
 FONT = os.getenv('FONT')
@@ -41,7 +55,7 @@ PORT =  int(os.getenv('PORT'))
 LOG_FILE =  os.getenv('LOG_FILE')
 
 
-logFormatter = logging.Formatter("%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s")
+logFormatter = logging.Formatter("%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s] [%(filename)s:%(lineno)d] %(message)s")
 rootLogger = logging.getLogger()
 rootLogger.setLevel(logging.DEBUG)
 
@@ -150,11 +164,13 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
             video_path
         ]
 
-        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        video_info = json.loads(result.stdout)
-        rotation = int(video_info['streams'][0].get('side_data_list', [{}])[0].get("rotation", 0))
-        rootLogger.debug(f'{video_id}:crop_video: Rotation: {rotation}')
-
+        try:
+            result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            video_info = json.loads(result.stdout)
+            rotation = int(video_info['streams'][0].get('side_data_list', [{}])[0].get("rotation", 0))
+            rootLogger.debug(f'{video_id}:crop_video: Rotation: {rotation}')
+        except Exception as e:
+            raise OSError(f"Unable to get rotation data: {e} : {result}")
 
         # Get video dimensions using ffprobe
         command = [
@@ -228,13 +244,13 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
         }
 
     except (base64.binascii.Error, ValueError) as e:
-        rootLogger.debug(f'{video_id}:crop_video: Error 400 occurred: {str(e)}')
+        rootLogger.debug(f'{video_id}:crop_video: Error 400 occurred: {str(e)}', stacklevel=2)
         raise HTTPException(status_code=400, detail="Invalid base64-encoded data")
     except OSError as e:
-        rootLogger.debug(f'{video_id}:crop_video: Error 500 occurred: {str(e)}')
+        rootLogger.debug(f'{video_id}:crop_video: Error 500 occurred: {str(e)}', stacklevel=2)
         raise HTTPException(status_code=500, detail=f"Internal Server error")
     except Exception as e:
-        rootLogger.debug(f'{video_id}:crop_video: An unexpected error occurred: {str(e)}')
+        rootLogger.debug(f'{video_id}:crop_video: An unexpected error occurred: {str(e)}', stacklevel=2)
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred")
 
 
@@ -342,13 +358,13 @@ async def trim_video(video_details: TrimVideoDetails, request: Request, response
         }
 
     except subprocess.CalledProcessError as e:
-        rootLogger.debug(f'{video_id}:trim_video: Error 500 occurred:subprocess.CalledProcessError: {str(e)}')
+        rootLogger.debug(f'{video_id}:trim_video: Error 500 occurred:subprocess.CalledProcessError: {str(e)}', stacklevel=2)
         raise HTTPException(status_code=500, detail="Internal Server Error")
     except OSError as e:
-        rootLogger.debug(f'{video_id}:trim_video: Error 500 occurred:OSError: {str(e)}')
+        rootLogger.debug(f'{video_id}:trim_video: Error 500 occurred:OSError: {str(e)}', stacklevel=2)
         raise HTTPException(status_code=500, detail="Internal Server Error")
     except Exception as e:
-        rootLogger.debug(f'{video_id}:trim_video: Error 500 Unexpected Error: {str(e)}')
+        rootLogger.debug(f'{video_id}:trim_video: Error 500 Unexpected Error: {str(e)}', stacklevel=2)
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
@@ -439,7 +455,7 @@ async def convert_video(video_details: VideoConvertDetails, request: Request, re
             "video": f"data:video/mp4;base64,{reconstructed_video_base64}"
         }
     except Exception as e:
-        rootLogger.debug(f'{video_id}:convert_video: Error 500 Unexpected Error: {str(e)}')
+        rootLogger.debug(f'{video_id}:convert_video: Error 500 Unexpected Error: {str(e)}', stacklevel=2)
         raise HTTPException(status_code=500, detail=f"Internal Server Error")
 
 
@@ -768,7 +784,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
         return {"detail": "Video finalized successfully"}
     
     except Exception as e:
-        rootLogger.debug(f'{video_id}:finalize_video: Error 500 Unexpected Error: {str(e)}')
+        rootLogger.debug(f'{video_id}:finalize_video: Error 500 Unexpected Error: {str(e)}', stacklevel=2)
         raise HTTPException(status_code=500, detail=f"Internal Server Error")
     
 
@@ -832,7 +848,7 @@ async def download_files(video_details: DownloadFilesDetails, authorization: str
             rootLogger.debug(f'(MANAGEMENT) {video_details.id}:download_files: Token failed verification')
             raise HTTPException(status_code=403, detail="Invalid credentials")
     except Exception as e:
-        rootLogger.debug(f'(MANAGEMENT) {video_details.id}:download_files: An unexpected error occurred: {str(e)}')
+        rootLogger.debug(f'(MANAGEMENT) {video_details.id}:download_files: An unexpected error occurred: {str(e)}', stacklevel=2)
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
@@ -872,7 +888,7 @@ async def list_videos(response: Response, authorization: str = Header(None)):
             rootLogger.debug(f'(MANAGEMENT) list_videos Token failed verification')
             raise HTTPException(status_code=403, detail="Invalid credentials")
     except Exception as e:
-        rootLogger.debug(f'(MANAGEMENT) list_videos: An unexpected error occurred: {str(e)}')
+        rootLogger.debug(f'(MANAGEMENT) list_videos: An unexpected error occurred: {str(e)}', stacklevel=2)
         raise HTTPException(status_code=500, detail="Internal Server Error")
     
 
@@ -899,7 +915,7 @@ async def delete_video(video_details: DeleteVideoDetails, response: Response, au
             rootLogger.debug(f'(MANAGEMENT) l{video_details.video_id}:delete_video: Token failed verification')
             raise HTTPException(status_code=403, detail="Invalid credentials")
     except Exception as e:
-        rootLogger.debug(f'(MANAGEMENT) {video_details.video_id}:delete_video: An unexpected error occurred: {str(e)}')
+        rootLogger.debug(f'(MANAGEMENT) {video_details.video_id}:delete_video: An unexpected error occurred: {str(e)}', stacklevel=2)
         raise HTTPException(status_code=500, detail="Internal Server Error")
     
 
