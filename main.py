@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from fastapi import FastAPI, HTTPException, Response, Header, Request
+from fastapi import FastAPI, HTTPException, Response, Header, Request, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import base64
 import os
@@ -101,6 +101,14 @@ def is_malicious(file_path):
     return False
     
 
+
+
+@app.get("/ping")
+async def ping():
+    return {"message": "pong"}
+
+
+
 class CropVideoDetails(BaseModel):
     encoded_video: str
     x_start_percent: float
@@ -110,23 +118,22 @@ class CropVideoDetails(BaseModel):
 
 
 
-@app.get("/ping")
-async def ping():
-    return {"message": "pong"}
-
 
 @app.post("/crop_video")
-async def crop_video(video_details: CropVideoDetails, request: Request, response: Response):
+async def crop_video(response: StreamingResponse, video: UploadFile = File(...), x_start_percent: float = Form(...), y_start_percent: float = Form(...), x_width_percent: float = Form(...), y_height_percent: float = Form(...)):
     video_id=""
     try:
         start_time = time.time()
-        rootLogger.info(f'crop_video:Received request to /crop_video with arguments: x_start_percent={video_details.x_start_percent}, y_start_percent={video_details.y_start_percent}, x_width_percent={video_details.x_width_percent}, y_height_percent={video_details.y_height_percent}')
+        rootLogger.info(f'crop_video:Received request to /crop_video with arguments: x_start_percent={x_start_percent}, y_start_percent={y_start_percent}, x_width_percent={x_width_percent}, y_height_percent={y_height_percent}')
+        '''
         # Validate base64 encoding and decode
         base64_video = video_details.encoded_video.split(";base64,")
         if len(base64_video) != 2:
             raise ValueError("Invalid base64 encoding")
         decoded_data = base64.b64decode(base64_video[1])
-        
+        '''
+        video_data = await video.read()
+
         # Generate a unique ID for the video processing request
         video_id = str(uuid.uuid4())
         rootLogger.debug(f'crop_video:Creating video id: {video_id}')
@@ -137,7 +144,7 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
         os.makedirs(video_dir, mode=0o775, exist_ok=True)
 
         # Determine file format
-        file_format = base64_video[0].split('/')[1]
+        file_format = video.filename.split('.')[-1]
 
         if file_format == "quicktime":
             file_format = "mov"
@@ -150,7 +157,7 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
         video_path = os.path.join(video_dir, f'base_video.{file_format}')
         rootLogger.debug(f'{video_id}:crop_video: Saving base video: {video_path}')
         with open(video_path, "wb") as file:
-            file.write(decoded_data)
+            file.write(video_data)
 
 
         if is_malicious(video_path):
@@ -203,10 +210,10 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
 
 
         # Calculate cropping dimensions
-        x_start = int(width * video_details.x_start_percent)
-        y_start = int(height * video_details.y_start_percent)
-        x_width = int(width * video_details.x_width_percent)
-        y_height = int(height * video_details.y_height_percent)
+        x_start = int(width * x_start_percent)
+        y_start = int(height * y_start_percent)
+        x_width = int(width * x_width_percent)
+        y_height = int(height * y_height_percent)
 
         # Output path for cropped video
         cropped_video_path = os.path.join(video_dir, f'cropped_video.mp4')
@@ -232,20 +239,23 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
         os.remove(video_path)
 
         # Read cropped video as bytes
-        with open(cropped_video_path, "rb") as cropped_file:
-            cropped_video_bytes = cropped_file.read()
+        # Open the cropped video file in binary mode for streaming
+        def iter_video_file():
+            with open(cropped_video_path, "rb") as cropped_file:
+                while chunk := cropped_file.read(1024 * 1024):  # Read in 1MB chunks
+                    yield chunk
 
-        # Encode cropped video bytes to base64
-        cropped_video_base64 = base64.b64encode(cropped_video_bytes).decode('utf-8')
-
-        # Return success message, generated video ID, and base64 encoded cropped video
-        execution_time = time.time()-start_time
+        # Return StreamingResponse to stream video data
+        execution_time = time.time() - start_time
         rootLogger.info(f'{video_id}:crop_video: Exiting /crop_video with status 201, after {execution_time} seconds')
-        response.status_code = 201 
-        return {
-            "id": video_id,
-            "video": f"data:video/mp4;base64,{cropped_video_base64}"
-        }
+        
+        # Set response status code to 201
+        response.status_code = 201
+        
+        # Return the video as a stream using StreamingResponse
+        response = StreamingResponse(iter_video_file(), media_type="video/mp4")
+        response.headers["X-Video-ID"] = video_id
+        return response
 
     except (base64.binascii.Error, ValueError) as e:
         rootLogger.debug(f'{video_id}:crop_video: Error 400 occurred: {str(e)}', stacklevel=2)
