@@ -139,8 +139,12 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
         # Determine file format
         file_format = base64_video[0].split('/')[1]
 
-        if file_format != "mp4":
+        if file_format == "quicktime":
+            file_format = "mov"
+
+        if file_format != "mp4" and file_format != "mov":
             raise ValueError(f"{video_id}:crop_video: Unsupported video format, file_format={file_format}")
+        
 
         # Save uploaded video
         video_path = os.path.join(video_dir, f'base_video.{file_format}')
