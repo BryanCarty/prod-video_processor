@@ -54,7 +54,6 @@ HOST =  os.getenv('HOST')
 PORT =  int(os.getenv('PORT'))
 LOG_FILE =  os.getenv('LOG_FILE')
 
-logging.getLogger("uvicorn.access").propagate = False
 logFormatter = logging.Formatter("%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s] [%(filename)s:%(lineno)d] %(message)s")
 rootLogger = logging.getLogger()
 rootLogger.setLevel(logging.DEBUG)
