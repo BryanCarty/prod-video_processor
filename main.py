@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from fastapi import FastAPI, HTTPException, Response, Header, Request
+from fastapi import FastAPI, HTTPException, Response, Header, Request, UploadFile, File, Path, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 import base64
 import os
@@ -16,17 +16,19 @@ from PIL import Image, ImageDraw, ImageFont
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
-import datetime
 import zipfile
 from io import BytesIO
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from typing import Dict
-from datetime import datetime
+from datetime import datetime, timedelta
 import pyclamd
 import logging
 import time
 import uvicorn
 import argparse
+import secrets
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import asyncio
 
 
 # Function to parse command-line arguments
@@ -53,6 +55,7 @@ ALLOW_ORIGINS =  os.getenv('ALLOW_ORIGINS')
 HOST =  os.getenv('HOST')
 PORT =  int(os.getenv('PORT'))
 LOG_FILE =  os.getenv('LOG_FILE')
+ACCEPTABLE_REQUEST_TOKEN_IP = os.getenv('ACCEPTABLE_REQUEST_TOKEN_IP')
 
 
 logFormatter = logging.Formatter("%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s] [%(filename)s:%(lineno)d] %(message)s")
@@ -101,43 +104,244 @@ def is_malicious(file_path):
     return False
     
 
-class CropVideoDetails(BaseModel):
-    encoded_video: str
-    x_start_percent: float
-    y_start_percent: float
-    x_width_percent: float
-    y_height_percent: float
 
 
-
-@app.get("/ping")
+@app.get("/ping_d3c8fc9a-3c6e-4257-95af-ac31b244546f")
 async def ping():
     return {"message": "pong"}
 
 
-@app.post("/crop_video")
-async def crop_video(video_details: CropVideoDetails, request: Request, response: Response):
-    video_id=""
+token_map = {}
+token_map_lock = asyncio.Lock()
+
+'''
+Token will allow ~ 5 interactions and have an expiry of 1 hr?
+'''
+@app.post("/request_temporary_token_0dfbbaa6-00a6-4926-8b7d-75833109fa60/{id}")
+async def request_temporary_token(request: Request, response: Response, id: str,):
+    client_host = request.client.host
+
+    # Check if the client's IP address is in the list of acceptable IPs
+    if client_host != ACCEPTABLE_REQUEST_TOKEN_IP:
+        rootLogger.info(f"Request token Access denied: Unauthorized IP address {client_host}")
+        # If the IP address is not acceptable, raise an HTTP 403 Forbidden error
+        raise HTTPException(status_code=403, detail="Access denied: Unauthorized IP address")
+    
+    # Generate a secure token using the secrets module
+    temporary_token = secrets.token_urlsafe(32)  # Generates a 32-byte secure token
+
+    # Get the current time
+    current_time = datetime.now().timestamp()  # Use UTC for consistency
+
+    # Store the token, IP, and timestamp in the map
+    async with token_map_lock:
+        token_map[temporary_token] = {"created_time": current_time, "permitted_requests": 20, "id": id}
+    
+
+    # Return the generated token
+    return {"message": "Token request successful","token": temporary_token}
+
+
+
+
+
+# Token-based security using Bearer token
+security = HTTPBearer()
+
+async def validate_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+
+    current_time = datetime.now()
+
+    # Define the threshold time (1 hour ago)
+    time_threshold = current_time - timedelta(hours=1)
+
+    # Iterate through the token_map and remove tokens based on the criteria
+    tokens_to_remove = []
+    
+    async with token_map_lock:
+        for token, info in token_map.items():
+            # Check if the token was created more than 1 hour ago or has 0 permitted requests
+            if info["created_time"] < time_threshold.timestamp() or info["permitted_requests"] <= 0:
+                tokens_to_remove.append(token)
+
+        # Remove the tokens
+        for token in tokens_to_remove:
+            del token_map[token]
+
+        if token not in token_map:
+            rootLogger.info(f"Token expired")
+            raise HTTPException(status_code=403, detail="Invalid token")
+        else:
+            token_map[token]["permitted_requests"] -= 1
+    return token
+
+
+@app.post("/upload_video/{id}")
+async def upload_video(
+    request: Request,
+    id: str,
+    file: UploadFile = File(...),
+    token: str = Depends(validate_token),
+    file_format: str = Query(...),
+):
+
+    """
+    Endpoint to upload a video file with a provided 'id' and a valid token.
+    :param id: The unique ID for the video file.
+    :param file: The video file to be uploaded.
+    :param token: The Bearer token passed via Authorization header.
+    :return: Success or failure message.
+    """
     try:
+
+        async with token_map_lock:
+            if token_map[token]["id"] != id:
+                raise HTTPException(status_code=403, detail="Invalid id")
+
+        client_host = request.client.host
+
+
         start_time = time.time()
-        rootLogger.info(f'crop_video:Received request to /crop_video with arguments: x_start_percent={video_details.x_start_percent}, y_start_percent={video_details.y_start_percent}, x_width_percent={video_details.x_width_percent}, y_height_percent={video_details.y_height_percent}')
-        # Validate base64 encoding and decode
-        base64_video = video_details.encoded_video.split(";base64,")
-        if len(base64_video) != 2:
-            raise ValueError("Invalid base64 encoding")
-        decoded_data = base64.b64decode(base64_video[1])
-        
-        # Generate a unique ID for the video processing request
-        video_id = str(uuid.uuid4())
-        rootLogger.debug(f'crop_video:Creating video id: {video_id}')
-        
+        rootLogger.info(f'upload_video:Received request to /upload_video from {client_host} @ {start_time}')
+    
+
         # Create directory using the generated ID
-        video_dir = os.path.join(VIDEO_DIR, video_id)
-        rootLogger.debug(f'{video_id}:crop_video:Creating video directory: {video_dir}')
+        video_dir = os.path.join(VIDEO_DIR, id)
+        rootLogger.debug(f'{id}:upload_video:Creating video directory: {video_dir}')
         os.makedirs(video_dir, mode=0o775, exist_ok=True)
 
+        file_format = file_format.split('/')[1]
         # Determine file format
-        file_format = base64_video[0].split('/')[1]
+        if file_format == "quicktime":
+            file_format = "mov"
+
+        if file_format != "mp4" and file_format != "mov":
+            raise ValueError(f"{id}:upload_video: Unsupported video format, file_format={file_format}")
+        
+
+        # Save uploaded video
+        video_path = os.path.join(video_dir, f'base_video.{file_format}')
+        rootLogger.debug(f'{id}:crop_video: Saving base video: {video_path}')
+
+        with open(video_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        if is_malicious(video_path):
+            os.remove(video_path)
+            async with token_map_lock:
+                token_map[token]["permitted_requests"] = 0
+            raise ValueError(f"{id}:upload: Malicious Video Upload Attempt: {video_path}")
+        
+        execution_time = time.time()-start_time
+        rootLogger.info(f'{id}:upload_video: Exiting /upload_video with status 200, after {execution_time} seconds')
+        return {"message": f"Video '{file.filename}' successfully uploaded."}
+    except HTTPException as e:
+        rootLogger.debug(f'{id}:{str(e)}', stacklevel=2)
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    except ValueError as e:
+        rootLogger.debug(f'{id}:upload_video: Error 400 occurred: {str(e)}', stacklevel=2)
+        raise HTTPException(status_code=400, detail="Invalid data received")
+    except Exception as e:
+        rootLogger.debug(f'{id}:upload: An unexpected error occurred: {str(e)}', stacklevel=2)
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred")
+
+
+
+
+
+@app.post("/download_video/{id}")
+async def download_video(
+    request: Request,
+    id: str,
+    token: str = Depends(validate_token),
+    stage: str = Query(...),
+):
+    """
+    Endpoint to download a video file with a provided 'id' and a valid token.
+    :param id: The unique ID for the video file.
+    :param token: The Bearer token passed via Authorization header.
+    :return: Video file as a response or an error message.
+    """
+    try:
+
+        async with token_map_lock:
+            if token_map[token]["id"] != id:
+                raise HTTPException(status_code=403, detail="Invalid id")
+            
+        client_host = request.client.host
+
+        start_time = time.time()
+        rootLogger.info(f'download_video:Received request to /download_video from {client_host} @ {start_time}')
+
+        if stage == 'C':
+            name="cropped_video"
+        elif stage == 'T':
+            name="trimmed_video"
+        elif stage == 'S':
+            name="sketchified_video"
+        elif stage == 'F':
+            name="flipbook_frames_video"
+        else:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        # Create the path for the video directory
+        video_file = os.path.join(VIDEO_DIR, id, f'{name}.mp4')
+        
+        # Check if the directory exists
+        if not os.path.exists(video_file):
+            raise HTTPException(status_code=404, detail="Video not found")
+
+        rootLogger.debug(f'{id}:download_video: Serving video: {video_file}')
+
+        # Return the file as a streaming response to be downloaded or displayed in the browser
+        execution_time = time.time() - start_time
+        rootLogger.info(f'{id}:download_video: Exiting /download_video with status 200, after {execution_time} seconds')
+
+        return FileResponse(
+            path=video_file, 
+            media_type='video/mp4',
+            filename=f"{id}.mp4"
+        )
+
+    except HTTPException as e:
+        rootLogger.debug(f'{id}:{str(e)}', stacklevel=2)
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    except ValueError as e:
+        rootLogger.debug(f'{id}:download_video: Error 400 occurred: {str(e)}', stacklevel=2)
+        raise HTTPException(status_code=400, detail="Invalid data received")
+    except Exception as e:
+        rootLogger.debug(f'{id}:download: An unexpected error occurred: {str(e)}', stacklevel=2)
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred")
+
+
+class CropVideoDetails(BaseModel):
+    order_id: str
+    x_start_percent: float
+    y_start_percent: float
+    x_width_percent: float
+    y_height_percent: float
+    file_format: str
+
+
+
+@app.post("/crop_video_5fde25a3-a5b0-42de-8d0f-4dc94bfd0175")
+async def crop_video(video_details: CropVideoDetails, request: Request, response: Response):
+    try:
+        client_host = request.client.host
+
+        # Check if the client's IP address is in the list of acceptable IPs
+        if client_host != ACCEPTABLE_REQUEST_TOKEN_IP:
+            rootLogger.info(f"Request crop video denied: Unauthorized IP address {client_host}")
+            # If the IP address is not acceptable, raise an HTTP 403 Forbidden error
+            raise HTTPException(status_code=403, detail="Access denied: Unauthorized IP address")
+
+        start_time = time.time()
+        rootLogger.info(f'crop_video:Received request to /crop_video with arguments: x_start_percent={video_details.x_start_percent}, y_start_percent={video_details.y_start_percent}, x_width_percent={video_details.x_width_percent}, y_height_percent={video_details.y_height_percent}, order_id={video_details.order_id}')
+    
+
+        video_id = video_details.order_id
+        file_format = video_details.file_format
 
         if file_format == "quicktime":
             file_format = "mov"
@@ -146,18 +350,8 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
             raise ValueError(f"{video_id}:crop_video: Unsupported video format, file_format={file_format}")
         
 
-        # Save uploaded video
-        video_path = os.path.join(video_dir, f'base_video.{file_format}')
-        rootLogger.debug(f'{video_id}:crop_video: Saving base video: {video_path}')
-        with open(video_path, "wb") as file:
-            file.write(decoded_data)
-
-
-        if is_malicious(video_path):
-            os.remove(video_path)
-            raise ValueError(f"{video_id}:crop_video: Malicious Video Upload Attempt: {video_path}")
-            
-
+        video_path = os.path.join(VIDEO_DIR, video_id, f'base_video.{file_format}')
+        rootLogger.debug(f'{video_id}:crop_video: video path: {video_path}')
         # Get rotation info
         command = [
             "ffprobe", 
@@ -189,8 +383,6 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
         video_info = json.loads(result.stdout)
 
 
-
-
         # Extract width and height
         width = video_info['streams'][0]['width']
         height = video_info['streams'][0]['height']
@@ -201,7 +393,6 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
         rootLogger.debug(f'{video_id}:crop_video: Video dimensions retrieved: {width}x{height}')
 
 
-
         # Calculate cropping dimensions
         x_start = int(width * video_details.x_start_percent)
         y_start = int(height * video_details.y_start_percent)
@@ -209,9 +400,7 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
         y_height = int(height * video_details.y_height_percent)
 
         # Output path for cropped video
-        cropped_video_path = os.path.join(video_dir, f'cropped_video.mp4')
-
-
+        cropped_video_path = os.path.join(VIDEO_DIR, video_id, f'cropped_video.mp4')
         
         # FFmpeg command to crop the video
         ffmpeg_command = [
@@ -231,20 +420,12 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
         rootLogger.debug(f'{video_id}:crop_video: Removing base video: {video_path}')
         os.remove(video_path)
 
-        # Read cropped video as bytes
-        with open(cropped_video_path, "rb") as cropped_file:
-            cropped_video_bytes = cropped_file.read()
-
-        # Encode cropped video bytes to base64
-        cropped_video_base64 = base64.b64encode(cropped_video_bytes).decode('utf-8')
-
         # Return success message, generated video ID, and base64 encoded cropped video
         execution_time = time.time()-start_time
         rootLogger.info(f'{video_id}:crop_video: Exiting /crop_video with status 201, after {execution_time} seconds')
         response.status_code = 201 
         return {
             "id": video_id,
-            "video": f"data:video/mp4;base64,{cropped_video_base64}"
         }
 
     except (base64.binascii.Error, ValueError) as e:
@@ -314,9 +495,17 @@ class TrimVideoDetails(BaseModel):
     end_time: float
 
 
-@app.post("/trim_video")
+@app.post("/trim_video_30133d03-567e-4330-a015-bc80005f809d")
 async def trim_video(video_details: TrimVideoDetails, request: Request, response: Response):
     try:
+        client_host = request.client.host
+
+        # Check if the client's IP address is in the list of acceptable IPs
+        if client_host != ACCEPTABLE_REQUEST_TOKEN_IP:
+            rootLogger.info(f"Request trim video denied: Unauthorized IP address {client_host}")
+            # If the IP address is not acceptable, raise an HTTP 403 Forbidden error
+            raise HTTPException(status_code=403, detail="Access denied: Unauthorized IP address")
+        
         video_id=""
         start_time = time.time()
         video_id = video_details.id
@@ -345,20 +534,12 @@ async def trim_video(video_details: TrimVideoDetails, request: Request, response
         rootLogger.debug(f'{video_id}:trim_video: Removing cropped video: {video_file}')
         os.remove(video_file)
 
-        # Read trimmed video bytes
-        with open(trimmed_video_path, "rb") as trimmed_video:
-            trimmed_video_bytes = trimmed_video.read()
-
-        # Encode cropped video bytes to base64
-        trimmed_video_base64 = base64.b64encode(trimmed_video_bytes).decode('utf-8')
-
         # Return response
         execution_time = time.time()-start_time
         rootLogger.info(f'{video_id}:trim_video: Exiting /trim_video with status 201, after {execution_time} seconds')
         response.status_code = 201
         return {
-            "id": video_details.id,
-            "video": f"data:video/mp4;base64,{trimmed_video_base64}"
+            "id": video_details.id
         }
 
     except subprocess.CalledProcessError as e:
@@ -379,8 +560,8 @@ async def trim_video(video_details: TrimVideoDetails, request: Request, response
 
 
 
-def extract_frames(dir, name, file_format, extraction_num):
-    frames_dir = f'{dir}/frames'
+def extract_frames(dir, name, file_format, target_dir="frames", extraction_num=0):
+    frames_dir = f'{dir}/{target_dir}'
 
     os.makedirs(frames_dir, exist_ok=True)
     if extraction_num:
@@ -390,6 +571,14 @@ def extract_frames(dir, name, file_format, extraction_num):
     completed_process = subprocess.run(command, shell=True)
     stdout = completed_process.stdout
     stderr = completed_process.stderr
+    return_code = completed_process.returncode
+    
+    if return_code != 0:
+        rootLogger.info("An error occurred extracting scetchify frames")
+        raise Exception("An error occurred extracting scetchify frames")
+    else:
+        rootLogger.info(f"Frame extraction into {frames_dir} ran successfully.")
+    
     return stdout, stderr
 
 
@@ -400,67 +589,76 @@ class VideoConvertDetails(BaseModel):
     scale_factor: int # Should default to 10
     sketchify: bool
 
-@app.post("/convert_video")
+
+
+@app.post("/convert_video_7a607819-0e86-4461-872a-cdea35478cf3")
 async def convert_video(video_details: VideoConvertDetails, request: Request, response: Response):
     try:
+        client_host = request.client.host
+
+        # Check if the client's IP address is in the list of acceptable IPs
+        if client_host != ACCEPTABLE_REQUEST_TOKEN_IP:
+            rootLogger.info(f"Request convert video denied: Unauthorized IP address {client_host}")
+            # If the IP address is not acceptable, raise an HTTP 403 Forbidden error
+            raise HTTPException(status_code=403, detail="Access denied: Unauthorized IP address")
+
         video_id=""
         start_time = time.time()
         video_id = video_details.id
         rootLogger.info(f'{video_id}:convert_video:Received request to /convert_video with arguments: id={video_details.id}, scale_factor={video_details.scale_factor}, sketchify={video_details.sketchify}')
 
-        video_dir = os.path.join(VIDEO_DIR, video_id)
-
-        # Reset final frames directory
-        final_frames_dir = f'{video_dir}/frames_to_return'
-        if os.path.exists(final_frames_dir):
-            rootLogger.debug(f'{video_id}:convert_video: Resetting frames_to_return directory: {final_frames_dir}')
-            shutil.rmtree(final_frames_dir)
-        os.makedirs(final_frames_dir, exist_ok=True)
-
-        # If the frames directory doesn't exist, create it
-        if not os.path.exists(f'{video_dir}/frames'): # Should stay constant
-            rootLogger.debug(f'{video_id}:convert_video: Extracting frames from {video_dir}/trimmed_video.mp4 into {video_dir}/frames')
-            extract_frames(video_dir, "trimmed_video", "mp4", 0)
-
-
-        if video_details.sketchify:
-            rootLogger.debug(f'{video_id}:convert_video: Sketchifying contents of {video_dir}/frames/ into {final_frames_dir}')
-            for filename in os.listdir(f'{video_dir}/frames'):
-                sketch.normalsketch(f'{video_dir}/frames/{filename}', final_frames_dir, filename.split('.')[0], scale=video_details.scale_factor)
+        action = "T"
+        if not video_details.sketchify: 
+            return {"id": video_id, "action": action}
         else:
-            # Move the contents of the frames directory to the final frames directory
-            rootLogger.debug(f'{video_id}:convert_video: (Not sketchifying) Moving contents of {video_dir}/frames/ into {final_frames_dir}')
-            for filename in os.listdir(f'{video_dir}/frames'):
-                source_item = os.path.join(f'{video_dir}/frames', filename)
-                destination_item = os.path.join(final_frames_dir, filename)
-                shutil.copy(source_item, destination_item)
+            video_dir = os.path.join(VIDEO_DIR, video_id)
+
+            sketchify_frames_dir = f'{video_dir}/sketchify_frames'
+            # If sketchify_frames exists wipe its contents, otherwise create the directory
+            if os.path.exists(sketchify_frames_dir):
+                rootLogger.debug(f'{video_id}:convert_video: Resetting sketchify_frames directory: {sketchify_frames_dir}')
+                shutil.rmtree(sketchify_frames_dir)
+            os.makedirs(sketchify_frames_dir, exist_ok=True)
+
+            # Put all frames into a directory
+            rootLogger.debug(f'{video_id}:convert_video: Extracting frames from {video_dir}/trimmed_video.mp4 into {video_dir}/sketchify_frames')
+            extract_frames(video_dir, "trimmed_video", "mp4", "sketchify_frames", 0)
+
+            # Sketchify all frames
+            rootLogger.debug(f'{video_id}:convert_video: Sketchifying contents of {video_dir}/sketchify_frames/ into {video_dir}/sketchify_frames/')
+            for filename in os.listdir(f'{video_dir}/sketchify_frames'):
+                sketch.normalsketch(f'{video_dir}/sketchify_frames/{filename}', f'{video_dir}/sketchify_frames', filename.split('.')[0], scale=video_details.scale_factor)
 
 
-        if os.path.exists(f"{video_dir}/processed_video.mp4"):
-            rootLogger.debug(f'{video_id}:convert_video: Removing {video_dir}/processed_video.mp4')
-            os.remove(f"{video_dir}/processed_video.mp4")
+            # create video from all frames
+            if os.path.exists(f"{video_dir}/sketchified_video.mp4"):
+                rootLogger.debug(f'{video_id}:convert_video: Removing {video_dir}/sketchified_video.mp4')
+                os.remove(f"{video_dir}/sketchified_video.mp4")
 
-        command = f'ffmpeg -i "{video_dir}/frames_to_return/frame%03d.png" -c:v libx264 "{video_dir}/processed_video.mp4"'
+            command = f'ffmpeg -i "{video_dir}/sketchify_frames/frame%03d.png" -c:v libx264 "{video_dir}/sketchified_video.mp4"'
 
-        rootLogger.debug(f'{video_id}:convert_video: Creating {video_dir}/processed_video.mp4 from the contents of {video_dir}/frames_to_return/')
-        subprocess.run(command, shell=True, check=True)
+            rootLogger.debug(f'{video_id}:convert_video: Creating {video_dir}/sketchified_video.mp4 from the contents of {video_dir}/sketchify_frames/')
+            subprocess.run(command, shell=True, check=True)
 
-        with open(f"{video_dir}/processed_video.mp4", "rb") as reconstructed_video:
-            reconstructed_video_bytes = reconstructed_video.read()
+            if os.path.exists(f"{video_dir}/sketchified_video.mp4"):
+                rootLogger.debug(f'{video_id}:convert_video: Removing {sketchify_frames_dir}')
+                shutil.rmtree(sketchify_frames_dir)
+            
+            action = "S"
 
-        # Encode cropped video bytes to base64
-        reconstructed_video_base64 = base64.b64encode(reconstructed_video_bytes).decode('utf-8')
-
+       
         execution_time = time.time()-start_time
         rootLogger.info(f'{video_id}:convert_video: Exiting /convert_video with status 201, after {execution_time} seconds')
         response.status_code = 201
         return {
             "id": video_details.id,
-            "video": f"data:video/mp4;base64,{reconstructed_video_base64}"
+            "action": action 
         }
     except Exception as e:
         rootLogger.debug(f'{video_id}:convert_video: Error 500 Unexpected Error: {str(e)}', stacklevel=2)
         raise HTTPException(status_code=500, detail=f"Internal Server Error")
+
+
 
 
 
@@ -486,9 +684,9 @@ def draw_dashed_line(draw, start_pos, end_pos, dash_length=25, space_length=10, 
 
 class VideoFinalizeDetails(BaseModel):
     id: str
-    video: str
     title: str
     message: str
+    action: str
 
 
 def extract_number_sort(filename):
@@ -498,10 +696,19 @@ def extract_number_sort(filename):
     except (IndexError, ValueError):
         # Handle cases where filename doesn't match expected format
         return float('-inf')
+    
 
-@app.post("/finalize_video")
+@app.post("/finalize_video_91952e02-2b37-44be-ba8b-a056b97a04ef")
 async def finalize_video(video_details: VideoFinalizeDetails, request: Request, response: Response):
     try:
+        client_host = request.client.host
+
+        # Check if the client's IP address is in the list of acceptable IPs
+        if client_host != ACCEPTABLE_REQUEST_TOKEN_IP:
+            rootLogger.info(f"Request finalize video denied: Unauthorized IP address {client_host}")
+            # If the IP address is not acceptable, raise an HTTP 403 Forbidden error
+            raise HTTPException(status_code=403, detail="Access denied: Unauthorized IP address")
+
         video_id=""
         start_time = time.time()
         video_id = video_details.id
@@ -509,46 +716,47 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
 
         video_dir = os.path.join(VIDEO_DIR, video_id)
-        finalized_video_path = f'{video_dir}/finalized_video'
-
-        # Create directory if it doesn't exist
-        rootLogger.debug(f'{video_id}:finalize_video: Creating finalized video path ({finalized_video_path}) if doesn\'t exist')
-        os.makedirs(finalized_video_path, exist_ok=True)
-
-        # Validate base64 encoding and decode video data
-        base64_video = video_details.video.split(";base64,")
-        if len(base64_video) != 2:
-            raise ValueError(f"{video_id}:finalize_video: Invalid base64 encoding")
-        
-        decoded_data = base64.b64decode(base64_video[1])
-
-        # Determine file format
-        file_format = base64_video[0].split('/')[1]
-
-        if file_format != "mp4":
-            raise ValueError(f"{video_id}:finalize_video: Unsupported video format")
-
-        # Write decoded data to video file
-        video_path = os.path.join(finalized_video_path, f'final.mp4')
-        rootLogger.debug(f'{video_id}:finalize_video: Writing video to {finalized_video_path}')
-
-        with open(video_path, "wb") as file:
-            file.write(decoded_data)
-
-        if is_malicious(video_path):
-            os.remove(video_path)
-            raise ValueError(f"{video_id}:finalize_video: Malicious Video Upload Attempt")
-
         rootLogger.debug(f'{video_id}:finalize_video: Retrieving video frame info...')
-        fps, total_frames = get_video_info(video_path)  
+        fps, total_frames = get_video_info(f'{video_dir}/trimmed_video.mp4')  
         max_num_frames = 10*fps
         num_frames_mapping = (total_frames*100)/max_num_frames
         extract_number = math.ceil(total_frames/num_frames_mapping)
         rootLogger.debug(f'{video_id}:finalize_video: Video fps={fps}, total_frame={total_frames}, max_num_frames={max_num_frames}, num_frames_mapping={num_frames_mapping}, extract_number={extract_number}')
-    
+
+
+        if video_details.action == "S":
+            finalized_video_name = "sketchified_video"
+            finalized_video_path = f'{video_dir}/{finalized_video_name}.mp4'
+            trimmed_video_path = f'{video_dir}/trimmed_video.mp4'
+            if os.path.exists(trimmed_video_path):
+                os.remove(trimmed_video_path)
+        else:
+            finalized_video_name = "trimmed_video"
+            finalized_video_path = f'{video_dir}/{finalized_video_name}.mp4'
+            sketchified_video_path = f'{video_dir}/sketchified_video.mp4'
+            if os.path.exists(sketchified_video_path):
+                os.remove(sketchified_video_path)
+
+        
+        # Create path to store frames for flipbook
+        rootLogger.debug(f'{video_id}:finalize_video: Creating directory to store frames for flipbook')
+        os.makedirs(os.path.join(VIDEO_DIR, video_id, "flipbook_frames"), exist_ok=True)
+
+
         # Call function to extract frames from the finalized video
-        rootLogger.debug(f'{video_id}:finalize_video: Extracting frames from {finalized_video_path}/final.mp4 into {finalized_video_path}/frames, with extraction_number={extract_number}')
-        extract_frames(finalized_video_path, "final", "mp4", extraction_num = extract_number)
+        rootLogger.debug(f'{video_id}:finalize_video: Extracting frames from {finalized_video_path} into /flipbook_frames, with extraction_number={extract_number}')
+        extract_frames(video_dir, finalized_video_name, "mp4", target_dir="flipbook_frames", extraction_num = extract_number)
+
+        # Creating video from frames
+        if os.path.exists(finalized_video_path):
+            rootLogger.debug(f'{video_id}:finalized_video: Removing {finalized_video_path}')
+            os.remove(finalized_video_path)
+
+        command = f'ffmpeg -framerate 4 -i "{video_dir}/flipbook_frames/frame%03d.png" -c:v libx264 "{video_dir}/flipbook_frames_video.mp4"'
+
+        rootLogger.debug(f'{video_id}:convert_video: Creating {video_dir}/flipbook_frames_video.mp4 from the contents of {video_dir}/flipbook_frames/')
+        subprocess.run(command, shell=True, check=True)
+
 
         # Need to iterate over frames and save on blue background
         dpi=300
@@ -560,7 +768,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
         
         rootLogger.debug(f'{video_id}:finalize_video: Placing frames on blue background...')
-        frames_dir = f'{finalized_video_path}/frames'
+        frames_dir = f'{video_dir}/flipbook_frames'
         for item in os.listdir(frames_dir):
             cover = Image.new('RGB', (pixel_width, pixel_height), blue)
             draw = ImageDraw.Draw(cover)
@@ -584,14 +792,6 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
         rootLogger.debug(f'{video_id}:finalize_video: Removing unecessary files...')
 
-        if os.path.exists(f'{video_dir}/frames'):
-            shutil.rmtree(f'{video_dir}/frames')
-        if os.path.exists(f'{video_dir}/frames_to_return'):    
-            shutil.rmtree(f'{video_dir}/frames_to_return')
-        if os.path.exists(f'{video_dir}/processed_video.mp4'):   
-            os.remove(f'{video_dir}/processed_video.mp4')
-        if os.path.exists(f'{video_dir}/trimmed_video.mp4'):  
-            os.remove(f'{video_dir}/trimmed_video.mp4')
 
         dpi=300
         cover_width_inches = 4.1338582677
@@ -672,7 +872,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
         rootLogger.debug(f'{video_id}:finalize_video: Creating full front-back cover')
 
         # Create full front-back cover
-        num_pages = count_files(f'{finalized_video_path}/frames')
+        num_pages = count_files(f'{video_dir}/flipbook_frames')
         pixel_width = int(cover_width_inches*dpi*2+(num_pages*THICKNESS_PER_PAGE*dpi))
         front_back_cover = Image.new('RGB', (pixel_width, pixel_height), blue)
 
@@ -684,7 +884,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
         front_back_cover.paste(right_book_cover, (right_margin, 0))
 
     
-        front_back_cover.save(f'{finalized_video_path}/frames/cover_page.png')
+        front_back_cover.save(f'{video_dir}/flipbook_frames/cover_page.png')
 
         # first page
         pixel_width = int(cover_width_inches*dpi)
@@ -724,12 +924,12 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
         draw.text((title_x, title_y), edited_title_text, fill=orange, font=title_font, align='center')
         
        
-        cover.save(f'{finalized_video_path}/frames/inner_message.png')
+        cover.save(f'{video_dir}/flipbook_frames/inner_message.png')
 
         rootLogger.debug(f'{video_id}:finalize_video: Creating print pages')
 
-        os.makedirs(f'{finalized_video_path}/print_pages')
-        image_paths = [os.path.join(f'{finalized_video_path}/frames', f) for f in os.listdir(f'{finalized_video_path}/frames') if f != 'cover_page.png']
+        os.makedirs(f'{video_dir}/print_pages')
+        image_paths = [os.path.join(f'{video_dir}/flipbook_frames', f) for f in os.listdir(f'{video_dir}/flipbook_frames') if f != 'cover_page.png']
 
 
         image_paths.sort(key=extract_number_sort)
@@ -742,7 +942,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
             end_index = min(i + 8, len(image_paths))
             image_files = image_paths[i:end_index]
             
-            c = canvas.Canvas(f'{finalized_video_path}/print_pages/page_{i}.pdf', pagesize=A4)
+            c = canvas.Canvas(f'{video_dir}/print_pages/page_{i}.pdf', pagesize=A4)
             
             for i, path in enumerate(image_files):
                 row = i // 2  # Determine row index
@@ -757,7 +957,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
             c.save()
 
 
-        cover_page = f'{finalized_video_path}/print_pages/cover_page.pdf'
+        cover_page = f'{video_dir}/print_pages/cover_page.pdf'
 
         # Create a canvas and specify A4 size in landscape orientation
         c = canvas.Canvas(cover_page, pagesize=landscape(A4))
@@ -766,7 +966,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
         width, height = landscape(A4)
 
         # Load the image
-        im = ImageReader(f'{finalized_video_path}/frames/cover_page.png')
+        im = ImageReader(f'{video_dir}/flipbook_frames/cover_page.png')
 
         # Calculate image dimensions
         im_width, im_height = im.getSize()
@@ -782,15 +982,18 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
 
         c.save()
+
+        shutil.rmtree(f'{video_dir}/flipbook_frames')
         execution_time = time.time()-start_time
         rootLogger.info(f'{video_id}:finalize_video: Exiting /finalize_video with status 200, after {execution_time} seconds')
         response.status_code=200
-        return {"detail": "Video finalized successfully"}
+        return {"id": video_details.id}
     
     except Exception as e:
         rootLogger.debug(f'{video_id}:finalize_video: Error 500 Unexpected Error: {str(e)}', stacklevel=2)
         raise HTTPException(status_code=500, detail=f"Internal Server Error")
     
+
 
 def verify_token(token):
     try:
@@ -823,9 +1026,10 @@ class DownloadFilesDetails(BaseModel):
     id: str
 
 
-@app.post("/download_files")
+@app.post("/download_files_21c03bac-ee69-4f84-8f6c-50ea7bddf9a3")
 async def download_files(video_details: DownloadFilesDetails, authorization: str = Header(None)):
     try:
+
         rootLogger.info(f'(MANAGEMENT) {video_details.id}:download_files: Received request to download for id={video_details.id}')
         if not authorization:
             rootLogger.debug(f'(MANAGEMENT) {video_details.id}:download_files: No authorization header received')
@@ -864,7 +1068,7 @@ def days_since_modified(modified_time):
 
 
 
-@app.get("/videos")
+@app.get("/videos_1a26252d-44a6-45cd-8149-359fbab2b850")
 async def list_videos(response: Response, authorization: str = Header(None)):
     try:
         if not authorization:
@@ -899,7 +1103,7 @@ async def list_videos(response: Response, authorization: str = Header(None)):
 class DeleteVideoDetails(BaseModel):
     video_id: str
 
-@app.delete("/videos")
+@app.delete("/videos_62aac615-083d-4361-95eb-e41102610394")
 async def delete_video(video_details: DeleteVideoDetails, response: Response, authorization: str = Header(None)):
     try:
         rootLogger.info(f'(MANAGEMENT) {video_details.video_id}:delete_video: Received request to delete for id={video_details.video_id}')
@@ -924,5 +1128,12 @@ async def delete_video(video_details: DeleteVideoDetails, response: Response, au
     
 
 
+
+
+
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host=HOST, port=PORT)
+
+

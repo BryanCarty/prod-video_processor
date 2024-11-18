@@ -16,6 +16,7 @@ python-dotenv = "1.0.1"
 reportlab = "4.2.2"
 sketchify = "0.0.8"
 uvicorn = "0.30.6"
+python-multipart = "^0.0.16"
 
 [build-system]
 requires = ["poetry-core"]
