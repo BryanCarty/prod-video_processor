@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException, Response, Header, Request, UploadFile, File, Path, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 import base64
@@ -9,7 +9,6 @@ import json
 import uuid
 import math
 import shutil
-from sketchify import sketch
 import jwt
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
@@ -29,6 +28,9 @@ import argparse
 import secrets
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import asyncio
+import cv2
+
+
 
 
 # Function to parse command-line arguments
@@ -523,7 +525,8 @@ async def trim_video(video_details: TrimVideoDetails, request: Request, response
             "-ss", convert_to_ffmpeg_time_format(video_details.start_time), 
             "-i", video_file,
             "-t", convert_to_ffmpeg_time_format(video_details.end_time - video_details.start_time),
-            "-c:v", "libx264",  
+            "-c:v", "libx264",
+            "-preset", "fast",   
             "-an",  
             trimmed_video_path
         ]
@@ -587,8 +590,11 @@ def extract_frames(dir, name, file_format, target_dir="frames", extraction_num=0
 
 class VideoConvertDetails(BaseModel):
     id: str
-    scale_factor: int # Should default to 10
+    scale_factor: int = Field(default=10)
     sketchify: bool
+
+
+
 
 
 
@@ -627,8 +633,14 @@ async def convert_video(video_details: VideoConvertDetails, request: Request, re
 
             # Sketchify all frames
             rootLogger.debug(f'{video_id}:convert_video: Sketchifying contents of {video_dir}/sketchify_frames/ into {video_dir}/sketchify_frames/')
-            for filename in os.listdir(f'{video_dir}/sketchify_frames'):
-                sketch.normalsketch(f'{video_dir}/sketchify_frames/{filename}', f'{video_dir}/sketchify_frames', filename.split('.')[0], scale=video_details.scale_factor)
+            sketchify_frames_dir = f'{video_dir}/sketchify_frames'
+            sigma = video_details.scale_factor*1.5
+            for filename in os.listdir(sketchify_frames_dir):
+                gray_img = cv2.cvtColor(cv2.imread(f'{sketchify_frames_dir}/{filename}'), cv2.COLOR_BGR2GRAY)
+                blurred_img = cv2.GaussianBlur(255-gray_img, (51, 51), sigmaX=sigma, sigmaY=sigma)
+                output = cv2.divide(gray_img, 255 - blurred_img, scale=256.0)
+                cv2.imwrite(f'{sketchify_frames_dir}/{filename.split('.')[0]}.png', output)
+                
 
 
             # create video from all frames
@@ -636,7 +648,7 @@ async def convert_video(video_details: VideoConvertDetails, request: Request, re
                 rootLogger.debug(f'{video_id}:convert_video: Removing {video_dir}/sketchified_video.mp4')
                 os.remove(f"{video_dir}/sketchified_video.mp4")
 
-            command = f'ffmpeg -i "{video_dir}/sketchify_frames/frame%03d.png" -c:v libx264 "{video_dir}/sketchified_video.mp4"'
+            command = f'ffmpeg -i "{video_dir}/sketchify_frames/frame%03d.png" -c:v libx264 -preset fast "{video_dir}/sketchified_video.mp4"'
 
             rootLogger.debug(f'{video_id}:convert_video: Creating {video_dir}/sketchified_video.mp4 from the contents of {video_dir}/sketchify_frames/')
             subprocess.run(command, shell=True, check=True)
