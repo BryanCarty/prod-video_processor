@@ -408,6 +408,9 @@ async def crop_video(video_details: CropVideoDetails, request: Request, response
             "-i", video_path,
             "-filter:v", f"crop={x_width}:{y_height}:{x_start}:{y_start}",
             "-c:v", "libx264",
+            "-preset", "medium",  # Set the preset to medium
+            "-x265-params", "pools=4",  # Configure x265 to use 4 thread pools
+            "-threads", "4",  # Set FFmpeg to use 4 threads
             "-an",
             cropped_video_path
         ]
