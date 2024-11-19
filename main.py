@@ -154,14 +154,14 @@ async def validate_token(credentials: HTTPAuthorizationCredentials = Depends(sec
     current_time = datetime.now()
 
     # Define the threshold time (1 hour ago)
-    time_threshold = current_time - timedelta(minutes=30)
+    time_threshold = current_time - timedelta(minutes=90)
 
     # Iterate through the token_map and remove tokens based on the criteria
     tokens_to_remove = []
     
     async with token_map_lock:
         for token, info in token_map.items():
-            # Check if the token was created more than 1 hour ago or has 0 permitted requests
+            # Check if the token was created more than 1.5 hours ago or has 0 permitted requests
             if info["created_time"] < time_threshold.timestamp() or info["permitted_requests"] <= 0:
                 tokens_to_remove.append(token)
 
