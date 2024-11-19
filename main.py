@@ -1007,7 +1007,7 @@ def verify_token(token):
 
 
 def get_files_by_id(order_id):
-    directory_path = f"{VIDEO_DIR}/{order_id}/finalized_video/print_pages"
+    directory_path = f"{VIDEO_DIR}/{order_id}/print_pages"
 
     if not os.path.exists(directory_path):
         raise FileNotFoundError(f"Directory {order_id} does not exist")
