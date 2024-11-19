@@ -115,12 +115,12 @@ token_map = {}
 token_map_lock = asyncio.Lock()
 
 '''
-Token will allow ~ 5 interactions and have an expiry of 1 hr?
+Token will allow ~ 100 interactions/30 mins
 '''
 @app.post("/request_temporary_token_0dfbbaa6-00a6-4926-8b7d-75833109fa60/{id}")
 async def request_temporary_token(request: Request, response: Response, id: str,):
     client_host = request.client.host
-
+    rootLogger.debug(f'Received Request for token, orderId=${id}')
     # Check if the client's IP address is in the list of acceptable IPs
     if client_host != ACCEPTABLE_REQUEST_TOKEN_IP:
         rootLogger.info(f"Request token Access denied: Unauthorized IP address {client_host}")
@@ -135,7 +135,7 @@ async def request_temporary_token(request: Request, response: Response, id: str,
 
     # Store the token, IP, and timestamp in the map
     async with token_map_lock:
-        token_map[temporary_token] = {"created_time": current_time, "permitted_requests": 20, "id": id}
+        token_map[temporary_token] = {"created_time": current_time, "permitted_requests": 100, "id": id}
     
 
     # Return the generated token
@@ -154,7 +154,7 @@ async def validate_token(credentials: HTTPAuthorizationCredentials = Depends(sec
     current_time = datetime.now()
 
     # Define the threshold time (1 hour ago)
-    time_threshold = current_time - timedelta(hours=1)
+    time_threshold = current_time - timedelta(minutes=30)
 
     # Iterate through the token_map and remove tokens based on the criteria
     tokens_to_remove = []
