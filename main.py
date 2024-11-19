@@ -29,6 +29,7 @@ import secrets
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import asyncio
 import cv2
+import concurrent.futures
 
 
 
@@ -594,13 +595,29 @@ class VideoConvertDetails(BaseModel):
     sketchify: bool
 
 
+sketchify_frames_dir = ""
+sigma = 15
+def sketchify(filename):
+    try:
+        gray_img = cv2.cvtColor(cv2.imread(f'{sketchify_frames_dir}/{filename}'), cv2.COLOR_BGR2GRAY)
+        blurred_img = cv2.GaussianBlur(255-gray_img, (51, 51), sigmaX=sigma, sigmaY=sigma)
+        output = cv2.divide(gray_img, 255 - blurred_img, scale=256.0)
+        cv2.imwrite(f'{sketchify_frames_dir}/{filename.split('.')[0]}.png', output)
+    except Exception as e:
+        rootLogger.debug(f'sketchify function threw error {e}')
+        raise
 
 
 
 
 @app.post("/convert_video_7a607819-0e86-4461-872a-cdea35478cf3")
 async def convert_video(video_details: VideoConvertDetails, request: Request, response: Response):
+    global sketchify_frames_dir
+    global sigma
+    sigma = video_details.scale_factor*1.5
+    
     try:
+        sigma = video_details.scale_factor*1.5
         client_host = request.client.host
 
         # Check if the client's IP address is in the list of acceptable IPs
@@ -633,13 +650,10 @@ async def convert_video(video_details: VideoConvertDetails, request: Request, re
 
             # Sketchify all frames
             rootLogger.debug(f'{video_id}:convert_video: Sketchifying contents of {video_dir}/sketchify_frames/ into {video_dir}/sketchify_frames/')
-            sketchify_frames_dir = f'{video_dir}/sketchify_frames'
-            sigma = video_details.scale_factor*1.5
-            for filename in os.listdir(sketchify_frames_dir):
-                gray_img = cv2.cvtColor(cv2.imread(f'{sketchify_frames_dir}/{filename}'), cv2.COLOR_BGR2GRAY)
-                blurred_img = cv2.GaussianBlur(255-gray_img, (51, 51), sigmaX=sigma, sigmaY=sigma)
-                output = cv2.divide(gray_img, 255 - blurred_img, scale=256.0)
-                cv2.imwrite(f'{sketchify_frames_dir}/{filename.split('.')[0]}.png', output)
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                executor.map(sketchify, os.listdir(sketchify_frames_dir))
+
+
                 
 
 
