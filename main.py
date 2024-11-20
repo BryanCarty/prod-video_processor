@@ -792,7 +792,6 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
         pixel_width = int(cover_width_inches*dpi)
         pixel_height = int(cover_height_inches*dpi)
         blue = (176, 224, 230)
-        white = 
         
         rootLogger.debug(f'{video_id}:finalize_video: Placing frames on blue background...')
         frames_dir = f'{video_dir}/flipbook_frames'
