@@ -792,12 +792,12 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
         pixel_width = int(cover_width_inches*dpi)
         pixel_height = int(cover_height_inches*dpi)
         blue = (176, 224, 230)
-
+        white = 
         
         rootLogger.debug(f'{video_id}:finalize_video: Placing frames on blue background...')
         frames_dir = f'{video_dir}/flipbook_frames'
         for item in os.listdir(frames_dir):
-            cover = Image.new('RGB', (pixel_width, pixel_height), blue)
+            cover = Image.new('RGB', (pixel_width, pixel_height), None)
             draw = ImageDraw.Draw(cover)
             item_path = os.path.join(frames_dir, item)
             # Save Image on right side of cover where the image is scaled down to have a height of pixel height
