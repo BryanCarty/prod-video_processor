@@ -602,7 +602,7 @@ def sketchify(filename):
         gray_img = cv2.cvtColor(cv2.imread(f'{sketchify_frames_dir}/{filename}'), cv2.COLOR_BGR2GRAY)
         blurred_img = cv2.GaussianBlur(255-gray_img, (51, 51), sigmaX=sigma, sigmaY=sigma)
         output = cv2.divide(gray_img, 255 - blurred_img, scale=256.0)
-        cv2.imwrite(f'{sketchify_frames_dir}/{filename.split('.')[0]}.png', output)
+        cv2.imwrite(f"{sketchify_frames_dir}/{filename.split('.')[0]}.png", output)
     except Exception as e:
         rootLogger.debug(f'sketchify function threw error {e}')
         raise
@@ -787,8 +787,12 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
         # Need to iterate over frames and save on blue background
         dpi=300
-        cover_width_inches = 4.1338582677
-        cover_height_inches = 2.9232283465
+        # 3mm = 0.11811 inches
+        cover_width_inches = 8.3/2 - 0.11811 # taking away the margin
+        cover_height_inches = 11.7/4 - 0.11811
+        #cover_width_inches = 4.1338582677 - 0.11811
+        #cover_height_inches = 2.9232283465 - 0.11811
+        
         pixel_width = int(cover_width_inches*dpi)
         pixel_height = int(cover_height_inches*dpi)
         blue = (176, 224, 230)
@@ -822,8 +826,12 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
 
         dpi=300
-        cover_width_inches = 4.1338582677
-        cover_height_inches = 2.9232283465
+        #cover_width_inches = 4.1338582677 - 0.11811
+        #cover_height_inches = 2.9232283465 - 0.11811
+        
+        cover_width_inches = 8.3/2 - 0.11811 # taking away the margin
+        cover_height_inches = 11.7/4 - 0.11811
+
         pixel_width = int(cover_width_inches*dpi)
         pixel_height = int(cover_height_inches*dpi)
         blue = (176, 224, 230)
@@ -919,7 +927,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
         right_book_cover.save(f'{video_dir}/flipbook_frames/back_page.png')
 
         # first page
-        pixel_width = int(cover_width_inches*dpi)
+        pixel_width = int((cover_width_inches)*dpi)
         cover = Image.new('RGB', (pixel_width, pixel_height), blue)
 
 
@@ -954,7 +962,6 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
         # Draw the title text
         draw.text((title_x, title_y), edited_title_text, fill=orange, font=title_font, align='center')
-        
        
         cover.save(f'{video_dir}/flipbook_frames/inner_message.png')
 
@@ -990,7 +997,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
             c.save()
         '''
         page_width, page_height = A4
-        margin_offset = 3 * 2.83465  # 3mm in points
+        margin_offset = 3  # 3mm in points
         image_width = page_width / 2  - margin_offset# Assuming equal widths for images
         image_height = page_height / 4 - margin_offset # Assuming equal heights for images
         
@@ -1005,11 +1012,13 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
             for img_idx, path in enumerate(image_files):
                 row = img_idx // 2  # Determine row index
                 col = img_idx % 2   # Determine column index
-                x = (col * image_width) + (margin_offset*(col+1))
-                y = page_height - ((row + 1) * image_height) + ((row+1)*margin_offset) # Calculate y-coordinate from top
+                x = (col * image_width) + (margin_offset*col)
+                y = page_height - ((row + 1) * (image_height + margin_offset))
+
 
                 # Draw the image on the canvas
                 c.drawImage(path, x, y, width=image_width, height=image_height)
+
 
                 # Add the top margin line
                 c.line(x, y + image_height + margin_offset, x + image_width, y + image_height + margin_offset)
