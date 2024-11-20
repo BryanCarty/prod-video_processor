@@ -897,6 +897,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
         left_book_cover = cover.copy()
         right_book_cover = cover.copy()
 
+        '''
         rootLogger.debug(f'{video_id}:finalize_video: Creating full front-back cover')
 
         # Create full front-back cover
@@ -913,6 +914,9 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
     
         front_back_cover.save(f'{video_dir}/flipbook_frames/cover_page.png')
+        '''
+        left_book_cover.save(f'{video_dir}/flipbook_frames/front_page.png')
+        right_book_cover.save(f'{video_dir}/flipbook_frames/back_page.png')
 
         # first page
         pixel_width = int(cover_width_inches*dpi)
@@ -961,6 +965,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
 
         image_paths.sort(key=extract_number_sort)
+        '''
         page_width, page_height = A4
         image_width = page_width / 2  # Assuming equal widths for images
         image_height = page_height / 4  # Assuming equal heights for images
@@ -983,8 +988,37 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
             # Save the PDF document
             c.save()
+        '''
+        page_width, page_height = A4
+        image_width = page_width / 2  # Assuming equal widths for images
+        image_height = page_height / 4  # Assuming equal heights for images
+        margin_offset = 3 * 2.83465  # 3mm in points
 
+        for page_idx in range(0, len(image_paths), 8):
+            end_index = min(page_idx + 8, len(image_paths))
+            image_files = image_paths[page_idx:end_index]
 
+            c = canvas.Canvas(f'{video_dir}/print_pages/page_{page_idx}.pdf', pagesize=A4)
+
+            for img_idx, path in enumerate(image_files):
+                row = img_idx // 2  # Determine row index
+                col = img_idx % 2   # Determine column index
+                x = col * image_width
+                y = page_height - (row + 1) * image_height  # Calculate y-coordinate from top
+
+                # Draw the image on the canvas
+                c.drawImage(path, x, y, width=image_width, height=image_height)
+
+                # Add the top margin line
+                c.line(x, y + image_height + margin_offset, x + image_width, y + image_height + margin_offset)
+
+                # Add the right margin line
+                c.line(x + image_width + margin_offset, y, x + image_width + margin_offset, y + image_height)
+
+            # Save the PDF document
+            c.save()
+
+        ''''
         cover_page = f'{video_dir}/print_pages/cover_page.pdf'
 
         # Create a canvas and specify A4 size in landscape orientation
@@ -1010,6 +1044,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
 
         c.save()
+        '''
 
         shutil.rmtree(f'{video_dir}/flipbook_frames')
         execution_time = time.time()-start_time
