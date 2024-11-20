@@ -990,15 +990,17 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
             c.save()
         '''
         page_width, page_height = A4
-        image_width = page_width / 2  # Assuming equal widths for images
-        image_height = page_height / 4  # Assuming equal heights for images
         margin_offset = 3 * 2.83465  # 3mm in points
+        image_width = page_width / 2  - margin_offset# Assuming equal widths for images
+        image_height = page_height / 4 - margin_offset # Assuming equal heights for images
+        
 
         for page_idx in range(0, len(image_paths), 8):
             end_index = min(page_idx + 8, len(image_paths))
             image_files = image_paths[page_idx:end_index]
 
             c = canvas.Canvas(f'{video_dir}/print_pages/page_{page_idx}.pdf', pagesize=A4)
+            c.setStrokeColor((0.8, 0.8, 0.8))
 
             for img_idx, path in enumerate(image_files):
                 row = img_idx // 2  # Determine row index
