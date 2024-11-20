@@ -1005,8 +1005,8 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
             for img_idx, path in enumerate(image_files):
                 row = img_idx // 2  # Determine row index
                 col = img_idx % 2   # Determine column index
-                x = col * image_width
-                y = page_height - (row + 1) * image_height  # Calculate y-coordinate from top
+                x = (col * image_width) + (margin_offset*(col+1))
+                y = page_height - ((row + 1) * image_height) + ((row+1)*margin_offset) # Calculate y-coordinate from top
 
                 # Draw the image on the canvas
                 c.drawImage(path, x, y, width=image_width, height=image_height)
