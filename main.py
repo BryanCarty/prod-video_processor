@@ -233,6 +233,7 @@ async def upload_video(
             rootLogger.debug(f'{id}:crop_video: Error saving base video: {video_path}: {e}')
             raise e
 
+        rootLogger.debug(f'{id}:crop_video: Checking if {video_path} is malicious')
         if is_malicious(video_path):
             os.remove(video_path)
             async with token_map_lock:
