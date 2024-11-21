@@ -226,9 +226,12 @@ async def upload_video(
         # Save uploaded video
         video_path = os.path.join(video_dir, f'base_video.{file_format}')
         rootLogger.debug(f'{id}:crop_video: Saving base video: {video_path}')
-
-        with open(video_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        try:
+            with open(video_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+        except Exception as e:
+            rootLogger.debug(f'{id}:crop_video: Error saving base video: {video_path}: {e}')
+            raise e
 
         if is_malicious(video_path):
             os.remove(video_path)
