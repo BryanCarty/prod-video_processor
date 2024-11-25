@@ -308,7 +308,10 @@ async def download_video(
         return FileResponse(
             path=video_file, 
             media_type='video/mp4',
-            filename=f"{id}.mp4"
+            filename=f"{id}.mp4",
+            headers={
+            "Content-Disposition": f"inline; filename={id}.mp4"
+        }
         )
 
     except HTTPException as e:
