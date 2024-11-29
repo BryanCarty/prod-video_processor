@@ -138,7 +138,7 @@ async def request_temporary_token(request: Request, response: Response, id: str,
 
     # Store the token, IP, and timestamp in the map
     async with token_map_lock:
-        token_map[temporary_token] = {"created_time": current_time, "permitted_requests": 100, "id": id}
+        token_map[temporary_token] = {"created_time": current_time, "permitted_requests": 1000, "id": id}
     
 
     # Return the generated token
@@ -1019,7 +1019,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
             for img_idx, path in enumerate(image_files):
                 row = img_idx // 2  # Determine row index
                 col = img_idx % 2   # Determine column index
-                x = (col * image_width) + (margin_offset*col)
+                x = (col * image_width) + (margin_offset*col) + (margin_offset if path.split('/')[-1]=="back_page.png" else 0)
                 y = page_height - ((row + 1) * (image_height + margin_offset))
 
 
