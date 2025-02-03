@@ -79,7 +79,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOW_ORIGINS.split(','),  # Allows access from all origins, you can specify specific origins if needed
+    allow_origins=ALLOW_ORIGINS.split(','),  
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],  # Allows these HTTP methods
     allow_headers=["*"],  # Allows all headers
@@ -117,9 +117,7 @@ async def ping():
 token_map = {}
 token_map_lock = asyncio.Lock()
 
-'''
-Token will allow ~ 100 interactions/30 mins
-'''
+
 @app.post("/request_temporary_token_0dfbbaa6-00a6-4926-8b7d-75833109fa60/{id}")
 async def request_temporary_token(request: Request, response: Response, id: str,):
     client_host = request.client.host
@@ -153,7 +151,7 @@ security = HTTPBearer()
 
 async def validate_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
-
+    '''
     current_time = datetime.now()
 
     # Define the threshold time (1 hour ago)
@@ -164,7 +162,6 @@ async def validate_token(credentials: HTTPAuthorizationCredentials = Depends(sec
     
     async with token_map_lock:
         for token, info in token_map.items():
-            # Check if the token was created more than 1.5 hours ago or has 0 permitted requests
             if info["created_time"] < time_threshold.timestamp() or info["permitted_requests"] <= 0:
                 tokens_to_remove.append(token)
 
@@ -177,6 +174,7 @@ async def validate_token(credentials: HTTPAuthorizationCredentials = Depends(sec
             raise HTTPException(status_code=403, detail="Invalid token")
         else:
             token_map[token]["permitted_requests"] -= 1
+    '''
     return token
 
 
@@ -794,11 +792,8 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
         # Need to iterate over frames and save on blue background
         dpi=300
-        # 3mm = 0.11811 inches
         cover_width_inches = 8.3/2 - 0.11811 # taking away the margin
         cover_height_inches = 11.7/4 - 0.11811
-        #cover_width_inches = 4.1338582677 - 0.11811
-        #cover_height_inches = 2.9232283465 - 0.11811
         
         pixel_width = int(cover_width_inches*dpi)
         pixel_height = int(cover_height_inches*dpi)
@@ -833,8 +828,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
 
         dpi=300
-        #cover_width_inches = 4.1338582677 - 0.11811
-        #cover_height_inches = 2.9232283465 - 0.11811
+        
         
         cover_width_inches = 8.3/2 - 0.11811 # taking away the margin
         cover_height_inches = 11.7/4 - 0.11811
@@ -912,24 +906,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
         left_book_cover = cover.copy()
         right_book_cover = cover.copy()
 
-        '''
-        rootLogger.debug(f'{video_id}:finalize_video: Creating full front-back cover')
 
-        # Create full front-back cover
-        num_pages = count_files(f'{video_dir}/flipbook_frames')
-        pixel_width = int(cover_width_inches*dpi*2+(num_pages*THICKNESS_PER_PAGE*dpi))
-        front_back_cover = Image.new('RGB', (pixel_width, pixel_height), blue)
-
-        left_margin = 0  
-        right_margin = front_back_cover.width - cover.width
-
-        # Step 3: Paste the book covers onto the full front-back cover
-        front_back_cover.paste(left_book_cover, (left_margin, 0))
-        front_back_cover.paste(right_book_cover, (right_margin, 0))
-
-    
-        front_back_cover.save(f'{video_dir}/flipbook_frames/cover_page.png')
-        '''
         left_book_cover.save(f'{video_dir}/flipbook_frames/front_page.png')
         right_book_cover.save(f'{video_dir}/flipbook_frames/back_page.png')
 
@@ -979,30 +956,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
 
 
         image_paths.sort(key=extract_number_sort)
-        '''
-        page_width, page_height = A4
-        image_width = page_width / 2  # Assuming equal widths for images
-        image_height = page_height / 4  # Assuming equal heights for images
-
-
-        for i in range(0, len(image_paths), 8):
-            end_index = min(i + 8, len(image_paths))
-            image_files = image_paths[i:end_index]
-            
-            c = canvas.Canvas(f'{video_dir}/print_pages/page_{i}.pdf', pagesize=A4)
-            
-            for i, path in enumerate(image_files):
-                row = i // 2  # Determine row index
-                col = i % 2   # Determine column index
-                x = col * image_width
-                y = page_height - (row + 1) * image_height  # Calculate y-coordinate from top
-
-                # Draw the image on the canvas
-                c.drawImage(path, x, y, width=image_width, height=image_height)
-
-            # Save the PDF document
-            c.save()
-        '''
+       
         page_width, page_height = A4
         margin_offset = 3  # 3mm in points
         image_width = page_width / 2  - margin_offset# Assuming equal widths for images
@@ -1036,33 +990,7 @@ async def finalize_video(video_details: VideoFinalizeDetails, request: Request, 
             # Save the PDF document
             c.save()
 
-        ''''
-        cover_page = f'{video_dir}/print_pages/cover_page.pdf'
-
-        # Create a canvas and specify A4 size in landscape orientation
-        c = canvas.Canvas(cover_page, pagesize=landscape(A4))
-
-        # Calculate dimensions of A4 in landscape mode
-        width, height = landscape(A4)
-
-        # Load the image
-        im = ImageReader(f'{video_dir}/flipbook_frames/cover_page.png')
-
-        # Calculate image dimensions
-        im_width, im_height = im.getSize()
-
-        # Calculate the desired height (1/4 of the width)
-        desired_height = width / 4
-
-        # Calculate scaling factor based on the desired height
-        scale = desired_height / im_height
-
-        # Draw the image on the canvas
-        c.drawImage(im, 0, 0, im_width * scale, im_height * scale)
-
-
-        c.save()
-        '''
+    
 
         shutil.rmtree(f'{video_dir}/flipbook_frames')
         execution_time = time.time()-start_time
